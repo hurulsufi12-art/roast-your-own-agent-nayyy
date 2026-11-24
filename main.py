@@ -15,23 +15,51 @@ TEXT = (
 MAX_CHARS = 200
 
 
-def check_gate(text):
+def validate(text):
     # Enforce the scorer's gate (RULES.txt): UTF-8, 1-200 chars, one line,
-    # not whitespace-only. Fail loudly instead of writing an invalid entry.
-    # Also refuse control characters: a stray \x00-\x1f would fail the
-    # scorer's UTF-8 text check.
-    if not 1 <= len(text) <= MAX_CHARS or "\n" in text or not text.strip():
-        raise SystemExit("entry text violates the 1-200 char single-line gate")
+    # not whitespace-only, no leading/trailing whitespace. Fail loudly
+    # instead of writing an invalid entry.
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise SystemExit("entry text is not valid UTF-8")
+    if not 1 <= len(text) <= MAX_CHARS:
+        raise SystemExit("entry text violates the 1-200 char gate")
+    if "\n" in text or "\r" in text:
+        raise SystemExit("entry text must be a single line")
+    if not text.strip():
+        raise SystemExit("entry text must not be only whitespace")
+    if text != text.strip():
+        raise SystemExit("entry text has leading or trailing whitespace")
+    # Refuse control characters: a stray \x00-\x1f would fail the
+    # scorer's UTF-8 text check (no control character is allowed here).
     if any(ord(c) < 0x20 for c in text):
         raise SystemExit("entry text contains a control character")
 
 
-def main():
-    check_gate(TEXT)
+def check_gate(text):
+    # Backwards-compatible name for the gate check.
+    validate(text)
+
+
+def write_entry(text):
+    # Write atomically, then read back and verify byte-for-byte so a
+    # partial write can never ship as the entry.
     out_dir = os.environ.get("OUTPUT_DIR", "/output")
     os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, "entry.txt"), "w", encoding="utf-8") as f:
-        f.write(TEXT)
+    target = os.path.join(out_dir, "entry.txt")
+    tmp = target + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, target)
+    with open(target, "rb") as f:
+        if f.read().decode("utf-8") != text:
+            raise SystemExit("entry.txt read-back mismatch")
+
+
+def main():
+    validate(TEXT)
+    write_entry(TEXT)
 
 
 if __name__ == "__main__":
